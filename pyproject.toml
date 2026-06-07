@@ -37,6 +37,7 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --tb=short --cov=rmaml --cov-report=term-missing"
+pythonpath = ["src"]
 
 [build-system]
 requires = ["poetry-core"]
