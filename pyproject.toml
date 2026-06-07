@@ -2,9 +2,10 @@
 name = "rmaml-few-shot"
 version = "0.1.0"
 description = "Riemannian Meta-Learning with Orthogonality Constraints"
-authors = ["Your Name <you@email.com>"]
+authors = ["tarun99.m@gmail.com"]
 readme = "README.md"
 packages = [{ include = "rmaml", from = "src" }]
+package-mode = false
 
 [tool.poetry.dependencies]
 python = "^3.11"
@@ -14,7 +15,6 @@ torchvision = "^0.17.0"
 geoopt = ">=0.5.0"
 mlflow = "^2.11.0"
 pyyaml = "^6.0"
-learn2learn = "^0.2.0"
 Pillow = "^10.0"
 numpy = ">=1.26,<2.0"      # Ray 2.10 requires numpy < 2.0
 tqdm = "^4.66"
