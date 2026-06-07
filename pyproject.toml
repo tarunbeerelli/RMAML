@@ -1,0 +1,43 @@
+[tool.poetry]
+name = "rmaml-few-shot"
+version = "0.1.0"
+description = "Riemannian Meta-Learning with Orthogonality Constraints"
+authors = ["Your Name <you@email.com>"]
+readme = "README.md"
+packages = [{ include = "rmaml", from = "src" }]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+# CPU torch for now — swap index-url for CUDA when you have a GPU machine
+torch = "^2.2.0"
+torchvision = "^0.17.0"
+geoopt = ">=0.5.0"
+mlflow = "^2.11.0"
+pyyaml = "^6.0"
+learn2learn = "^0.2.0"
+Pillow = "^10.0"
+numpy = ">=1.26,<2.0"      # Ray 2.10 requires numpy < 2.0
+tqdm = "^4.66"
+ray = {version = "^2.10.0", extras = ["tune"]}
+optuna = "^3.6.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+pytest-cov = "^5.0"
+ruff = "^0.4.0"
+pre-commit = "^3.7"
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short --cov=rmaml --cov-report=term-missing"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

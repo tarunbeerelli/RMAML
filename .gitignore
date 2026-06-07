@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+.coverage
+mlruns/
+mlartifacts/
+checkpoints/
+data/
+.pytest_cache/
+poetry.lock
