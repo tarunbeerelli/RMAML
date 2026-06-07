@@ -15,6 +15,7 @@ import os
 import torch
 import yaml
 from rmaml.datasets.episode_sampler import EpisodeSampler
+from rmaml.datasets.miniimagenet import load_miniimagenet
 from rmaml.datasets.synthetic import make_synthetic_dataset
 from rmaml.meta_learner import RMAMLTrainer
 from rmaml.models.rmaml_model import RMAMLModel
@@ -45,11 +46,11 @@ def build_sampler(cfg: dict, smoke_test: bool) -> EpisodeSampler:
         log.info("Using synthetic dataset (smoke test mode)")
         dataset_map = make_synthetic_dataset(n_classes=64, images_per_class=20)
     else:
-        # Real dataset loading goes here in Phase 5
-        # For now raise a clear error
-        raise NotImplementedError(
-            "Real dataset loading not implemented yet. "
-            "Run with --smoke-test for now."
+        log.info(f"Loading MiniImageNet from {cfg['data']['root']}")
+        dataset_map = load_miniimagenet(
+            root=cfg["data"]["root"],
+            split="train",
+            augment=cfg["data"]["augment"],
         )
 
     return EpisodeSampler(
