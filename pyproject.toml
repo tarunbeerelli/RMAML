@@ -2,7 +2,7 @@
 name = "rmaml-few-shot"
 version = "0.1.0"
 description = "Riemannian Meta-Learning with Orthogonality Constraints"
-authors = ["tarun99.m@gmail.com"]
+authors = ["Tarun Beerelli <tarun99.m@gmail.com>"]
 readme = "README.md"
 packages = [{ include = "rmaml", from = "src" }]
 package-mode = true
