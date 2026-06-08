@@ -1,34 +1,27 @@
 """
-MiniImageNet dataset loader.
+MiniImageNet dataset loader — pickle format.
 
-Expected folder structure after download:
+Expected files:
     data/miniimagenet/
-        images/          ← all 60,000 images as .jpg
-        train.csv        ← filename, label columns
-        val.csv
-        test.csv
+        mini-imagenet-cache-train.pkl
+        mini-imagenet-cache-val.pkl
+        mini-imagenet-cache-test.pkl
 
-Download instructions:
-    1. kaggle datasets download -d arjunashok33/miniimagenet
-    2. unzip into data/miniimagenet/
-
-Split: 64 train / 16 val / 20 test classes (Ravi & Larochelle 2017)
+Each pickle contains a dict:
+    {
+        "image_data": np.array of shape (N, 84, 84, 3),
+        "class_dict": {class_name: [list of indices]}
+    }
 """
 
-import csv
+import pickle
 from pathlib import Path
 
 import torch
-from PIL import Image
 from torchvision import transforms
 
 
-def build_transform(augment: bool = False, image_size: int = 84) -> transforms.Compose:
-    """
-    Standard MiniImageNet transforms.
-    augment=True  → random crop + flip (meta-train only)
-    augment=False → centre crop only (meta-val, meta-test)
-    """
+def build_transform(augment: bool = False) -> transforms.Compose:
     normalize = transforms.Normalize(
         mean=[0.485, 0.456, 0.406],
         std=[0.229, 0.224, 0.225],
@@ -36,7 +29,8 @@ def build_transform(augment: bool = False, image_size: int = 84) -> transforms.C
     if augment:
         return transforms.Compose(
             [
-                transforms.RandomResizedCrop(image_size),
+                transforms.ToPILImage(),
+                transforms.RandomResizedCrop(84),
                 transforms.RandomHorizontalFlip(),
                 transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4),
                 transforms.ToTensor(),
@@ -45,8 +39,7 @@ def build_transform(augment: bool = False, image_size: int = 84) -> transforms.C
         )
     return transforms.Compose(
         [
-            transforms.Resize(int(image_size * 1.15)),
-            transforms.CenterCrop(image_size),
+            transforms.ToPILImage(),
             transforms.ToTensor(),
             normalize,
         ]
@@ -55,50 +48,32 @@ def build_transform(augment: bool = False, image_size: int = 84) -> transforms.C
 
 def load_miniimagenet(
     root: str,
-    split: str = "train",  # "train" | "val" | "test"
+    split: str = "train",
     augment: bool = False,
 ) -> dict[int, list[torch.Tensor]]:
     """
-    Load MiniImageNet split into a dataset_map.
+    Load MiniImageNet pickle split into a dataset_map.
 
     Returns:
         dict mapping class_id (int) → list of image tensors (3, 84, 84)
     """
     root = Path(root)
-    csv_path = root / f"{split}.csv"
-    images_dir = root / "images"
+    pkl_path = root / f"mini-imagenet-cache-{split}.pkl"
 
-    if not csv_path.exists():
-        raise FileNotFoundError(
-            f"CSV not found: {csv_path}\n"
-            f"Download MiniImageNet and place CSVs in {root}"
-        )
+    if not pkl_path.exists():
+        raise FileNotFoundError(f"Pickle not found: {pkl_path}")
+
+    with open(pkl_path, "rb") as f:
+        data = pickle.load(f)
+
+    image_data = data["image_data"]  # (N, 84, 84, 3) uint8
+    class_dict = data["class_dict"]  # {class_name: [indices]}
 
     transform = build_transform(augment=augment)
 
-    # Build label → int mapping from CSV
-    label_to_id: dict[str, int] = {}
-    rows: list[tuple[str, str]] = []
-
-    with open(csv_path) as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            fname = row["filename"]
-            label = row["label"]
-            if label not in label_to_id:
-                label_to_id[label] = len(label_to_id)
-            rows.append((fname, label))
-
-    # Load images into dataset_map
-    dataset_map: dict[int, list[torch.Tensor]] = {
-        i: [] for i in range(len(label_to_id))
-    }
-
-    for fname, label in rows:
-        img_path = images_dir / fname
-        img = Image.open(img_path).convert("RGB")
-        tensor = transform(img)
-        dataset_map[label_to_id[label]].append(tensor)
+    dataset_map: dict[int, list[torch.Tensor]] = {}
+    for class_id, (class_name, indices) in enumerate(class_dict.items()):
+        dataset_map[class_id] = [transform(image_data[i]) for i in indices]
 
     n_classes = len(dataset_map)
     n_images = sum(len(v) for v in dataset_map.values())
