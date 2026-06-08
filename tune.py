@@ -167,6 +167,7 @@ def main() -> None:
         run_config=ray.train.RunConfig(
             name="rmaml_hpo",
             storage_path=os.path.abspath("ray_results"),
+            verbose=0,
         ),
     )
 
