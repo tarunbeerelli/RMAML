@@ -14,6 +14,7 @@ import os
 
 import torch
 import yaml
+from rmaml.baselines.maml import MAMLModel, MAMLTrainer
 from rmaml.datasets.episode_sampler import EpisodeSampler
 from rmaml.datasets.miniimagenet import load_miniimagenet
 from rmaml.datasets.synthetic import make_synthetic_dataset
@@ -74,18 +75,32 @@ def main() -> None:
 
     device = get_device()
     log.info(f"Device: {device}")
+    log.info(f"Mode: {'MAML baseline' if args.maml else 'RMAML'}")
 
-    # Build components
-    model = RMAMLModel(n_way=cfg["model"]["n_way"])
-    trainer = RMAMLTrainer(
-        model=model,
-        n_inner=cfg["meta"]["n_inner"],
-        alpha=cfg["meta"]["alpha"],
-        outer_lr=cfg["optimizer"]["outer_lr"],
-        meta_batch=cfg["meta"]["meta_batch"],
-        device=device,
-        use_cadam=(cfg["optimizer"]["type"] == "cadam"),
-    )
+    if args.maml:
+        model = MAMLModel(n_way=cfg["model"]["n_way"])
+        trainer = MAMLTrainer(
+            model=model,
+            n_inner=cfg["meta"]["n_inner"],
+            alpha=cfg["meta"]["alpha"],
+            outer_lr=cfg["optimizer"]["outer_lr"],
+            meta_batch=cfg["meta"]["meta_batch"],
+            device=device,
+            optimizer=cfg["optimizer"]["type"]
+            if cfg["optimizer"]["type"] in ["adam", "sgd"]
+            else "adam",
+        )
+    else:
+        model = RMAMLModel(n_way=cfg["model"]["n_way"])
+        trainer = RMAMLTrainer(
+            model=model,
+            n_inner=cfg["meta"]["n_inner"],
+            alpha=cfg["meta"]["alpha"],
+            outer_lr=cfg["optimizer"]["outer_lr"],
+            meta_batch=cfg["meta"]["meta_batch"],
+            device=device,
+            use_cadam=(cfg["optimizer"]["type"] == "cadam"),
+        )
     sampler = build_sampler(cfg, smoke_test=args.smoke_test)
 
     # Create checkpoint dir
@@ -93,7 +108,11 @@ def main() -> None:
 
     # Training loop with MLflow tracking
     setup_tracking(cfg["experiment"])
-    run_name = "smoke-test" if args.smoke_test else cfg["optimizer"]["type"]
+    run_name = (
+        "smoke-test"
+        if args.smoke_test
+        else ("maml_adam" if args.maml else cfg["optimizer"]["type"])
+    )
 
     with RunTracker(cfg, run_name=run_name) as tracker:
         for epoch in range(n_epochs):
@@ -106,7 +125,7 @@ def main() -> None:
                 tracker.log(step=epoch, **metrics)
 
             # Orthogonality check
-            if epoch % cfg["logging"]["orth_check_every"] == 0:
+            if not args.maml and epoch % cfg["logging"]["orth_check_every"] == 0:
                 err = model.orthogonality_error()
                 log.info(f"           | orth_error={err:.2e}")
                 tracker.log(step=epoch, orth_error=err)
