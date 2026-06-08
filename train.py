@@ -108,9 +108,6 @@ def main() -> None:
         )
     sampler = build_sampler(cfg, smoke_test=args.smoke_test)
 
-    # Create checkpoint dir
-    os.makedirs("checkpoints", exist_ok=True)
-
     # Training loop with MLflow tracking
     setup_tracking(cfg["experiment"])
     run_name = (
@@ -118,6 +115,10 @@ def main() -> None:
         if args.smoke_test
         else ("maml_adam" if args.maml else cfg["optimizer"]["type"])
     )
+
+    # Create checkpoint dir
+    ckpt_dir = f"checkpoints/{run_name}"
+    os.makedirs(ckpt_dir, exist_ok=True)
 
     with RunTracker(cfg, run_name=run_name) as tracker:
         for epoch in range(n_epochs):
@@ -144,7 +145,7 @@ def main() -> None:
 
             # Checkpoint
             if epoch % cfg["logging"]["checkpoint_every"] == 0 and not args.smoke_test:
-                path = f"checkpoints/epoch_{epoch:06d}.pt"
+                path = f"{ckpt_dir}/epoch_{epoch:06d}.pt"
                 torch.save(model.state_dict(), path)
                 tracker.log_artifact(path)
                 log.info(f"           | saved {path}")

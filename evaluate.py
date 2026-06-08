@@ -129,6 +129,30 @@ def main() -> None:
     log.info(f"  Accuracy: {mean_acc*100:.2f}% ± {ci*100:.2f}%")
     log.info("=" * 50)
 
+    import mlflow
+    from rmaml.utils.tracking import setup_tracking
+
+    setup_tracking(cfg["experiment"])
+    run_name = f"eval_{args.split}_{'maml' if args.maml else cfg['optimizer']['type']}"
+    with mlflow.start_run(run_name=run_name):
+        mlflow.log_params(
+            {
+                "checkpoint": args.checkpoint,
+                "split": args.split,
+                "n_episodes": args.n_episodes,
+                "mode": "maml" if args.maml else "rmaml",
+                "optimizer": cfg["optimizer"]["type"],
+            }
+        )
+        mlflow.log_metrics(
+            {
+                "test_accuracy": mean_acc,
+                "test_accuracy_pct": mean_acc * 100,
+                "confidence_interval": ci,
+            }
+        )
+        log.info(f"Results logged to MLflow run: {run_name}")
+
 
 if __name__ == "__main__":
     main()
