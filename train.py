@@ -68,6 +68,11 @@ def main() -> None:
         action="store_true",
         help="Run 10 steps with synthetic data to verify pipeline",
     )
+    parser.add_argument(
+        "--maml",
+        action="store_true",
+        help="Run vanilla MAML baseline instead of RMAML",
+    )
     args = parser.parse_args()
 
     cfg = yaml.safe_load(open(args.config))
