@@ -120,7 +120,7 @@ def main() -> None:
         "meta_batch": base_cfg["meta"]["meta_batch"],
         "k_shot": base_cfg["data"]["k_shot"],
         "q_query": base_cfg["data"]["q_query"],
-        "data_root": base_cfg["data"]["root"],
+        "data_root": os.path.abspath(base_cfg["data"]["root"]),
         # Searched params
         "alpha": tune.loguniform(0.01, 0.5),
         "outer_lr": tune.loguniform(1e-4, 1e-2),
