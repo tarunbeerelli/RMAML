@@ -1,0 +1,29 @@
+experiment: maml_conv4_miniimagenet
+
+model:
+  backbone: conv4
+  n_way: 5
+
+meta:
+  n_inner: 5
+  alpha: 0.1
+  meta_batch: 4
+  n_epochs: 60000
+
+optimizer:
+  type: adam          # standard Adam for MAML baseline
+  outer_lr: 0.001
+  weight_decay: 0.0
+
+data:
+  dataset: miniimagenet
+  root: ./data/miniimagenet
+  k_shot: 1
+  q_query: 15
+  augment: true
+
+logging:
+  log_every: 100
+  eval_every: 500
+  checkpoint_every: 1000
+  orth_check_every: 500
