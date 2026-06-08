@@ -93,10 +93,12 @@ def trial_fn(trial_cfg: dict) -> None:
 
             # Report to Ray Tune — ASHA uses "val_accuracy" to decide kills
             tune.report(
-                val_accuracy=val_metrics["accuracy"],
-                meta_loss=metrics["meta_loss"],
-                orth_error=orth_err,
-                epoch=epoch,
+                {
+                    "val_accuracy": val_metrics["accuracy"],
+                    "meta_loss": metrics["meta_loss"],
+                    "orth_error": orth_err,
+                    "epoch": epoch,
+                }
             )
 
 
