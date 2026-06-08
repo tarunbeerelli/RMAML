@@ -164,7 +164,7 @@ def main() -> None:
             scheduler=scheduler,
             search_alg=search_alg,
         ),
-        run_config=ray.train.RunConfig(
+        run_config=tune.TuneConfig(
             name="rmaml_hpo",
             storage_path=os.path.abspath("ray_results"),
             verbose=0,
