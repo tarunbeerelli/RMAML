@@ -162,7 +162,7 @@ def main() -> None:
             scheduler=scheduler,
             search_alg=search_alg,
         ),
-        run_config=tune.TuneConfig(
+        run_config=tune.RunConfig(
             name="rmaml_hpo",
             storage_path=os.path.abspath("ray_results"),
         ),
