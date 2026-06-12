@@ -11,6 +11,7 @@ import geoopt
 import torch
 import torch.nn.functional as F
 from rmaml.datasets.episode_sampler import Episode
+from rmaml.kernels.stiefel_retraction import TRITON_AVAILABLE, cayley_retract
 from rmaml.models.rmaml_model import RMAMLModel
 
 _stiefel = geoopt.Stiefel()
@@ -22,6 +23,7 @@ def inner_step(
     episode: Episode,
     alpha: float,
     device: torch.device,
+    use_triton=False,
 ) -> dict:
     """
     One step of Riemannian gradient descent on the support set.
@@ -61,7 +63,10 @@ def inner_step(
         if name == "classifier.weight":
             # Riemannian update: project grad → retract back to manifold
             rgrad = _stiefel.egrad2rgrad(p, g)
-            new_params[name] = _stiefel.retr(p, -alpha * rgrad)
+            if use_triton and TRITON_AVAILABLE:
+                new_params[name] = cayley_retract(p, -alpha * rgrad)
+            else:
+                new_params[name] = _stiefel.retr(p, -alpha * rgrad)
         else:
             # Standard Euclidean gradient step
             new_params[name] = p - alpha * g
@@ -92,12 +97,14 @@ class RMAMLTrainer:
         meta_batch: int = 4,
         device: torch.device = torch.device("cpu"),
         use_cadam: bool = True,
+        use_triton=False,
     ):
         self.model = model.to(device)
         self.n_inner = n_inner
         self.alpha = alpha
         self.meta_batch = meta_batch
         self.device = device
+        self.use_triton = use_triton
 
         # Outer optimizer — geoopt handles Stiefel + Euclidean params
         # RiemannianAdam = cAdam from paper

@@ -73,6 +73,11 @@ def main() -> None:
         action="store_true",
         help="Run vanilla MAML baseline instead of RMAML",
     )
+    parser.add_argument(
+        "--triton",
+        action="store_true",
+        help="Use Triton Cayley retraction instead of geoopt QR",
+    )
     args = parser.parse_args()
 
     cfg = yaml.safe_load(open(args.config))
@@ -105,6 +110,7 @@ def main() -> None:
             meta_batch=cfg["meta"]["meta_batch"],
             device=device,
             use_cadam=(cfg["optimizer"]["type"] == "cadam"),
+            use_triton=args.triton,
         )
     sampler = build_sampler(cfg, smoke_test=args.smoke_test)
 
