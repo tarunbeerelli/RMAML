@@ -43,3 +43,14 @@ jobs:
 
       - name: Test
         run: poetry run pytest
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t rmaml:ci .
+
+      - name: Run smoke test in Docker
+        run: docker run --rm rmaml:ci
