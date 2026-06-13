@@ -13,6 +13,5 @@ notebooks/training_curves.png
 notebooks/.ipynb_checkpoints/
 notebooks/test.ipynb
 notebooks/test-checkpoint.ipynb
-training_curves.png
 test.ipynb
 test-checkpoint.ipynb
