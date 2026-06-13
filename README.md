@@ -9,38 +9,39 @@ A from-scratch PyTorch implementation of **RMAML** (Tabealhojeh et al., *Pattern
 
 **Highlights:**
 - Complete RMAML implementation with Conv4 backbone, Stiefel layer, cAdam/cSGDM optimizers
-- Custom **Triton kernel** for Cayley retraction using the Woodbury identity — **99× faster** than geoopt's QR retraction on (1600,5) matrices
-- Full ablation: RMAML vs MAML, cAdam vs cSGDM, with proper 600-episode evaluation on held-out test classes
+- Custom **Triton kernel** for Cayley retraction using the Woodbury identity — **9.5× faster** on RTX 4090, **99× faster** on CPU vs geoopt QR
+- Full ablation: RMAML vs MAML, cAdam vs cSGDM, proper 600-episode evaluation on held-out test classes
 - Ray Tune HPO with ASHA scheduler and 2-GPU parallel search
 
 ---
 
 ## Results
 
-5-way 1-shot classification on MiniImageNet, Conv4 backbone, 600 test episodes on held-out classes.
+5-way 1-shot classification on MiniImageNet, Conv4 backbone.
+Evaluated on 600 episodes using held-out test classes (20 classes never seen during training).
 
-| Method | Optimizer | Test Accuracy | Orth Error |
-|--------|-----------|--------------|------------|
+| Method | Optimizer | Test Accuracy | Orth Error (final) |
+|--------|-----------|--------------|-------------------|
 | MAML | Adam | 44.17% ± 0.78% | N/A |
 | RMAML | cSGDM | 26.68% ± 0.52% | 3.1e-04 |
-| RMAML | cAdam | 45.56% ± 0.79% | 1.8e-05 |
-| **RMAML + HPO** | **cAdam** | **43.96% ± 0.76%** | **6.5e-06** |
+| **RMAML** | **cAdam** | **45.56% ± 0.79%** | **1.8e-05** |
+| RMAML + HPO | cAdam | 43.96% ± 0.76% | 6.5e-06 |
 | Paper (RMAML) | cAdam | 50.03% ± 0.84% | — |
 
 **Key findings:**
 - RMAML + cAdam outperforms MAML by **+1.4pp** on held-out test classes
-- cAdam vs cSGDM gap is dramatic (**+19pp**) — the Riemannian optimizer matters as much as the constraint
-- cSGDM orthogonality error is 17× larger than cAdam — confirming instability on the manifold
-- HPO best config: `alpha=0.0172, outer_lr=0.000378, n_inner=3` — fewer inner steps than default generalises better
-- Gap to paper's 50.03% likely due to evaluation protocol differences (paper uses transductive BN)
+- cAdam vs cSGDM gap is **+19pp** — the Riemannian optimizer matters as much as the constraint itself
+- cSGDM orthogonality error is 17× larger than cAdam — confirms manifold instability with momentum SGD
+- HPO found `n_inner=3` generalises comparably to `n_inner=5` — fewer inner steps with slightly higher outer LR
+- Gap to paper's 50.03% likely due to evaluation protocol — paper uses transductive batch norm at test time
 
 ---
 
 ## Training Curves
 
-![Training Curves](notebooks/training_curves.png)
+![Training Curves](assets/training_curves.png)
 
-Three panels show: (1) meta-loss convergence, (2) validation accuracy on train classes, (3) orthogonality error — cAdam stays stable at 1e-5 while cSGDM explodes to 1e-4 immediately.
+Three panels: (1) meta-loss convergence — all methods converge similarly in loss, (2) validation accuracy — RMAML+cAdam and MAML track closely while cSGDM plateaus at 27%, (3) orthogonality error — cAdam stays stable at ~1e-5 while cSGDM explodes to 1e-4 immediately at epoch 0.
 
 ---
 
@@ -53,7 +54,7 @@ Standard MAML:  θ ∈ R^(n×p)         — unconstrained
 RMAML:          θ ∈ St(n,p)         — W^T W = I enforced at every step
 ```
 
-The constraint acts as geometric regularisation — reducing the effective parameter search space which is especially valuable in few-shot settings where labeled data is scarce.
+The constraint acts as geometric regularisation — reducing the effective parameter search space, which is especially valuable in few-shot settings where labeled data is scarce.
 
 ---
 
@@ -63,11 +64,11 @@ The constraint acts as geometric regularisation — reducing the effective param
 Input (3×84×84)
       ↓
 Conv4 Backbone          ← 4× [Conv→BN→ReLU→MaxPool], Euclidean params
-      ↓                    64 channels, output: 1600-dim features
+      ↓                    64 channels → 1600-dim flattened features
 1600-dim features
       ↓
-Stiefel Linear Layer    ← W ∈ St(1600, 5), W^T W = I enforced via retraction
-      ↓                    7,985 params vs 8,000 in standard FC (p(p+1)/2 fewer)
+Stiefel Linear Layer    ← W ∈ St(1600,5), W^T W = I enforced via retraction
+      ↓                    7,985 params vs 8,000 standard FC (p(p+1)/2 fewer)
 5-way logits
 ```
 
@@ -80,38 +81,12 @@ Only the final FC layer weight lives on the Stiefel manifold. All conv/BN parame
 **1. Fewer parameters:**
 ```
 Standard FC:  n×p = 1600×5 = 8,000 parameters
-Stiefel FC:   np - p(p+1)/2 = 8,000 - 15 = 7,985 parameters
+Stiefel FC:   np - p(p+1)/2 = 7,985 parameters
 ```
-Scales significantly at larger output dimensions (e.g. replacing a 4096×1000 FC layer reduces parameters from 4M to 3.6M).
+Scales significantly at larger output dims — replacing a 4096×1000 FC layer reduces from 4M to 3.6M parameters.
 
 **2. Faster convergence:**
-The constrained search space means RMAML outperforms MAML even with fewer inner-loop steps and smaller meta-batch sizes (Table 9 in paper). The orthogonality constraint acts as implicit regularisation.
-
-**3. Triton Cayley retraction kernel:**
-Standard QR retraction (used by geoopt) is a general LAPACK routine not optimised for tall-skinny matrices. We implement a custom Triton kernel using the **Cayley retraction with Woodbury identity**:
-
-```
-Standard QR:      O(np²) — general LAPACK, not optimised for n >> p
-Cayley+Woodbury:  reduces (n,n) matrix inversion to (2p,2p)
-                  for (1600,5): (1600,1600) → (10,10) inversion
-```
-
-Fusing all operations into one Triton kernel eliminates 5 intermediate HBM roundtrips:
-
-```
-Without fusion:  HBM → compute → HBM → compute → HBM (×6 passes)
-With Triton:     HBM → SRAM → compute everything → HBM (×1 pass)
-
-Memory traffic eliminated: ~320KB per call
-At 1.2M calls during training: ~384GB total
-```
-
-**Benchmark results (CPU):**
-```
-Shape (1600, 5):  Cayley 150μs  vs  geoopt 14,896μs  →  99x faster
-Shape (512, 5):   Cayley  79μs  vs  geoopt  1,245μs  →  16x faster
-```
-*CUDA speedup numbers: TBD (run on Vast.ai RTX 4090)*
+The constrained search space means RMAML outperforms MAML even with fewer inner-loop steps and smaller meta-batch sizes (Table 9 in paper). HPO confirmed `n_inner=3` achieves comparable accuracy to `n_inner=5`.
 
 ---
 
@@ -119,45 +94,40 @@ Shape (512, 5):   Cayley  79μs  vs  geoopt  1,245μs  →  16x faster
 
 > **The most technically novel component of this project.**
 
-Every inner loop step requires a *retraction* — mapping an updated parameter back onto the Stiefel manifold. Standard libraries (geoopt) use QR decomposition for this, which is a general LAPACK routine not designed for our specific matrix shape.
+Every inner loop step requires a *retraction* — mapping an updated parameter back onto the Stiefel manifold. Standard libraries (geoopt) use QR decomposition, which is a general LAPACK routine not designed for our specific matrix shape `(1600, 5)`.
 
 ### The Mathematical Trick
 
-The Cayley retraction (Wen & Yin, 2013) avoids QR entirely:
+The Cayley retraction (Wen & Yin, 2013):
 
 ```
 W_new = (I + A/2)⁻¹(I - A/2)W    where A = VWᵀ - WVᵀ  (skew-symmetric)
 ```
 
-Naively, `A` is `(1600×1600)` — forming and inverting it would be catastrophic. The **Woodbury identity** reduces this to a `(10×10)` inversion:
+Naively, `A` is `(1600×1600)` — forming and inverting it is O(n³). The **Woodbury identity** reduces this to a `(10×10)` inversion:
 
 ```
 Write A = U_L U_Rᵀ  where  U_L = [V, -W],  U_R = [W, V]   both (1600, 10)
 
-Then: (I + A/2)⁻¹ = I - U_L(2I + U_Rᵀ U_L)⁻¹ U_Rᵀ
+(I + A/2)⁻¹ = I - U_L(2I + U_Rᵀ U_L)⁻¹ U_Rᵀ
                               ↑
                         (10×10) — trivially inverted
 
 W_new = (I - A/2)W - U_L · K⁻¹ · U_Rᵀ · (I - A/2)W
-         ↑ cheap    ↑ (10×10)  ↑ (10,p)
 ```
 
-**The (1600×1600) matrix is never formed.** All expensive operations reduce to `(1600,10)` matmuls and a `(10,10)` solve.
+The `(1600×1600)` matrix is **never formed**. All expensive operations reduce to `(1600,10)` matmuls and a `(10,10)` solve.
 
 ### The Computational Trick
 
-Even with Woodbury, the PyTorch implementation launches 6 separate CUDA kernels with 5 HBM roundtrips. Our Triton kernel fuses all operations into one:
+Triton fuses all 6 operations into one kernel, keeping intermediates in SRAM instead of roundtripping through HBM:
 
 ```
-Without fusion:
-  HBM → matmul → HBM → solve → HBM → matmul → HBM → add → HBM   (5 roundtrips)
-
-With Triton fusion:
-  HBM → SRAM → [matmul, solve, matmul, add all in registers] → HBM  (1 roundtrip)
-
-Memory traffic eliminated per call:  ~320KB
-Total eliminated during training:    ~384GB  (1.2M retraction calls)
+Without fusion:  HBM → matmul → HBM → solve → HBM → matmul → HBM  (5 roundtrips)
+With Triton:     HBM → SRAM → [all ops in registers] → HBM          (1 roundtrip)
 ```
+
+Memory saved per call: ~320KB. Over 1.2M retraction calls during training: **~384GB total HBM traffic eliminated.**
 
 ### Benchmark Results
 
@@ -170,18 +140,15 @@ Total eliminated during training:    ~384GB  (1.2M retraction calls)
 | (1600, 5) | RTX 4090 CUDA | geoopt QR | 6,133 | 1× |
 | (1600, 5) | RTX 4090 CUDA | **Cayley+Woodbury** | **645** | **9.5×** |
 
-### Why This Matters
+### Why Both Tricks Are Necessary
 
-```
-60,000 outer steps × 4 tasks × 5 inner steps = 1,200,000 retraction calls
-At 99× speedup: hours of compute saved on a single training run
-```
-
-The speedup is both mathematical (Woodbury eliminates O(n²) computation) and computational (Triton fusion eliminates memory bandwidth bottleneck). Neither alone is sufficient — Woodbury makes the fusion physically possible by keeping intermediates small enough to fit in SRAM.
+Woodbury alone (without fusion) still launches 6 separate CUDA kernels. Triton fusion alone (without Woodbury) would need to materialise the `(1600×1600)` matrix — 10MB, won't fit in SRAM. **The math enables the engineering.**
 
 ---
 
-RMAML introduces **cAdam** — a Riemannian extension of Adam that uses parallel transport to accumulate gradient moment estimates on the manifold:
+## cAdam — Riemannian Adam
+
+RMAML introduces **cAdam** — a Riemannian extension of Adam using parallel transport to accumulate gradient moments on the manifold:
 
 ```
 Standard Adam:   m(t+1) = β₁m(t) + (1-β₁)∇J
@@ -189,38 +156,31 @@ cAdam:           m(t+1) = β₁Γ_{t-1→t}(m(t)) + (1-β₁)π_{θ(t)}(∇J)
                           ↑ parallel transport    ↑ tangent projection
 ```
 
-Where `Γ` transports the momentum buffer from the previous tangent space to the current one, ensuring moment estimates accumulate consistently on the manifold.
-
-Implemented via `geoopt.optim.RiemannianAdam` — mathematically equivalent to the paper's cAdam formulation (Bécigneul & Ganea, ICLR 2019). We use geoopt rather than reimplementing from scratch because: (1) the mathematical contribution is in applying it to bi-level meta-learning, not in the optimizer itself; (2) geoopt's implementation is numerically tested and maintained.
+Implemented via `geoopt.optim.RiemannianAdam` — mathematically equivalent to Bécigneul & Ganea (ICLR 2019). We use geoopt rather than reimplementing because the contribution is in applying it to bi-level meta-learning, not in the optimizer itself.
 
 ---
 
 ## Bi-level Optimization on the Stiefel Manifold
 
-RMAML extends MAML's bi-level optimization to Riemannian space:
-
 **Inner loop** (task-specific adaptation, k steps):
 ```
-φ(l+1) = R_{φ(l)}(-α · π_{φ(l)}(∇_φ L(D^s, φ(l))))
-          ↑ retraction  ↑ tangent projection
+φ(l+1) = R_{φ(l)}(-α · π_{φ(l)}(∇_φ L(Dˢ, φ(l))))
 ```
 
 **Outer loop** (meta-update across tasks):
 ```
-θ(t+1) = R_{θ(t)}(-β · Σᵢ π_{θ(t)}(∇_θ Lᵢ(D^q, φᵢ)))
+θ(t+1) = R_{θ(t)}(-β · Σᵢ π_{θ(t)}(∇_θ Lᵢ(Dᵠ, φᵢ)))
 ```
 
-Both updates preserve Riemannian geometry — parameters always stay on St(1600,5).
-
-We use `functional_forward` with `create_graph=True` for differentiable inner loops, rather than the `higher` library, because it gives explicit control over which parameters receive Riemannian vs Euclidean updates.
+Both updates preserve Riemannian geometry — parameters always stay on St(1600,5). We use `functional_forward` with `create_graph=True` for differentiable inner loops rather than the `higher` library, giving explicit control over which parameters receive Riemannian vs Euclidean updates.
 
 ---
 
 ## HPO with Ray Tune
 
-Hyperparameter search using Ray Tune with ASHA early stopping and Optuna search algorithm. Two-stage search:
+Two-stage hyperparameter search using ASHA early stopping and Optuna:
 
-**Stage 1 — Wide search** (20 trials):
+**Stage 1 — Wide search** (20 trials, 1× GPU):
 ```
 alpha:    loguniform(0.01, 0.5)
 outer_lr: loguniform(1e-4, 1e-2)
@@ -230,13 +190,30 @@ optimizer: choice([cadam, csgdm])
 
 **Stage 2 — Focused search** (10 trials, 2× RTX 4090 parallel):
 ```
-alpha:    loguniform(0.01, 0.05)   ← narrowed around best=0.018
-outer_lr: loguniform(1e-4, 5e-4)  ← narrowed around best=0.000217
+alpha:    loguniform(0.01, 0.05)
+outer_lr: loguniform(1e-4, 5e-4)
 n_inner:  choice([3, 5, 7])
-optimizer: cadam (fixed)           ← cSGDM eliminated
+optimizer: cadam (fixed — cSGDM eliminated by Stage 1)
+use_triton: True
 ```
 
-Best config from Stage 1: `alpha=0.018, outer_lr=0.000217, n_inner=5, cadam`
+Best config: `alpha=0.0172, outer_lr=0.000378, n_inner=3, cadam`
+
+---
+
+## Dataset
+
+**MiniImageNet** — 100 classes, 600 images each, 84×84px.
+Split: 64 train / 16 val / 20 test (Ravi & Larochelle 2017).
+
+```bash
+# Download via Kaggle
+pip install kaggle
+kaggle datasets download -d whitemoon/miniimagenet --path data/miniimagenet
+cd data/miniimagenet && unzip miniimagenet.zip && rm miniimagenet.zip
+```
+
+The dataset is not committed — managed separately per machine. For reproducible data versioning, DVC can be configured with a GCS remote.
 
 ---
 
@@ -247,12 +224,12 @@ rmaml/
 ├── src/rmaml/
 │   ├── models/
 │   │   ├── backbone.py           ← Conv4 encoder (84×84 → 1600-dim)
-│   │   ├── stiefel_layer.py      ← Orthogonal FC layer, geoopt.ManifoldParameter
+│   │   ├── stiefel_layer.py      ← Orthogonal FC layer
 │   │   └── rmaml_model.py        ← Full model + functional_forward
 │   ├── baselines/
 │   │   └── maml.py               ← Vanilla MAML (Euclidean baseline)
 │   ├── kernels/
-│   │   └── stiefel_retraction.py ← Triton Cayley retraction, Woodbury identity
+│   │   └── stiefel_retraction.py ← Triton Cayley retraction, Woodbury
 │   ├── datasets/
 │   │   ├── miniimagenet.py       ← MiniImageNet pickle loader
 │   │   ├── episode_sampler.py    ← N-way K-shot episode sampling
@@ -265,13 +242,14 @@ rmaml/
 │   ├── conv4_csgdm.yaml          ← RMAML + cSGDM (ablation)
 │   ├── conv4_maml.yaml           ← MAML baseline
 │   └── conv4_hpo_best.yaml       ← Best HPO config
-├── tests/                        ← 49 unit tests, all CPU
+├── tests/                        ← 49 unit tests, all CPU-only
 ├── notebooks/
 │   └── results_analysis.ipynb   ← Training curves, results table
 ├── train.py                      ← Entry point (--maml, --triton flags)
-├── evaluate.py                   ← Proper 600-episode test evaluation
+├── evaluate.py                   ← 600-episode test evaluation with 95% CI
 ├── tune.py                       ← Ray Tune HPO (--n-gpus for parallel)
-└── .github/workflows/ci.yml      ← CI pipeline
+├── Dockerfile                    ← CPU smoke test image
+└── .github/workflows/ci.yml      ← lint + test + docker build
 ```
 
 ---
@@ -283,7 +261,12 @@ rmaml/
 pip install poetry
 poetry install
 
-# Smoke test (synthetic data, CPU, 10 steps)
+# Download dataset (requires Kaggle account)
+pip install kaggle
+kaggle datasets download -d whitemoon/miniimagenet --path data/miniimagenet
+cd data/miniimagenet && unzip miniimagenet.zip && rm miniimagenet.zip && cd ../..
+
+# Smoke test (synthetic data, CPU, no dataset needed)
 PYTHONPATH=src poetry run python train.py \
   --config configs/conv4_miniimagenet.yaml \
   --smoke-test
@@ -291,13 +274,13 @@ PYTHONPATH=src poetry run python train.py \
 # Full training — RMAML + cAdam
 PYTHONPATH=src python train.py --config configs/conv4_miniimagenet.yaml
 
-# Full training — with Triton kernel
+# With Triton kernel (GPU only)
 PYTHONPATH=src python train.py --config configs/conv4_miniimagenet.yaml --triton
 
 # MAML baseline
 PYTHONPATH=src python train.py --config configs/conv4_maml.yaml --maml
 
-# Evaluate on held-out test classes (600 episodes)
+# Evaluate on held-out test classes (600 episodes, 95% CI)
 PYTHONPATH=src python evaluate.py \
   --checkpoint checkpoints/cadam/epoch_050000.pt \
   --config configs/conv4_miniimagenet.yaml
@@ -306,6 +289,10 @@ PYTHONPATH=src python evaluate.py \
 PYTHONPATH=src python tune.py \
   --config configs/conv4_miniimagenet.yaml \
   --n-gpus 2
+
+# Docker smoke test
+docker build -t rmaml .
+docker run --rm rmaml
 
 # View experiment tracking
 mlflow ui
@@ -317,8 +304,9 @@ mlflow ui
 
 ```bash
 poetry run pytest
-# 49 passed — Stiefel ops, episode sampler, backbone,
-# training loop, MAML vs RMAML comparison, Cayley retraction correctness + speed
+# 49 passed — Stiefel manifold ops, episode sampler, backbone,
+# training loop, MAML vs RMAML comparison, Cayley retraction
+# correctness + speed benchmark
 ```
 
 ---
