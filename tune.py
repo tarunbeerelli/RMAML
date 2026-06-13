@@ -55,6 +55,7 @@ def trial_fn(trial_cfg: dict) -> None:
         meta_batch=trial_cfg["meta_batch"],
         device=device,
         use_cadam=(trial_cfg["optimizer"] == "cadam"),
+        use_triton=trial_cfg.get("use_triton", False),
     )
 
     # Dataset — use real data if available, synthetic as fallback
@@ -105,13 +106,13 @@ def trial_fn(trial_cfg: dict) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/conv4_miniimagenet.yaml")
-    parser.add_argument("--n-trials", type=int, default=20)
+    parser.add_argument("--n-trials", type=int, default=10)
     parser.add_argument("--smoke-test", action="store_true")
     args = parser.parse_args()
 
     base_cfg = yaml.safe_load(open(args.config))
 
-    ray.init()
+    ray.init(num_gpus=2)
 
     # Search space — sampled independently per trial
     search_space = {
@@ -122,10 +123,11 @@ def main() -> None:
         "q_query": base_cfg["data"]["q_query"],
         "data_root": os.path.abspath(base_cfg["data"]["root"]),
         # Searched params
-        "alpha": tune.loguniform(0.01, 0.5),
-        "outer_lr": tune.loguniform(1e-4, 1e-2),
-        "n_inner": tune.choice([1, 3, 5, 10]),
-        "optimizer": tune.choice(["cadam", "csgdm"]),
+        "alpha": tune.loguniform(0.01, 0.05),
+        "outer_lr": tune.loguniform(1e-4, 5e-4),
+        "n_inner": tune.choice([3, 5, 7]),
+        "optimizer": "cadam",
+        "use_triton": True,
     }
 
     if args.smoke_test:
@@ -156,7 +158,7 @@ def main() -> None:
     tuner = tune.Tuner(
         tune.with_resources(
             trial_fn,
-            resources={"gpu": 1, "cpu": 4},
+            resources={"gpu": 1, "cpu": 2},
         ),
         param_space=search_space,
         tune_config=tune.TuneConfig(
