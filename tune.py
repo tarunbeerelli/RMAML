@@ -108,11 +108,12 @@ def main() -> None:
     parser.add_argument("--config", default="configs/conv4_miniimagenet.yaml")
     parser.add_argument("--n-trials", type=int, default=10)
     parser.add_argument("--smoke-test", action="store_true")
+    parser.add_argument("--n-gpus", type=int, default=1)
     args = parser.parse_args()
 
     base_cfg = yaml.safe_load(open(args.config))
 
-    ray.init(num_gpus=2)
+    ray.init(num_gpus=args.n_gpus)
 
     # Search space — sampled independently per trial
     search_space = {
