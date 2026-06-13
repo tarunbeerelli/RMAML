@@ -8,8 +8,6 @@ mlartifacts/
 checkpoints/
 data/
 .pytest_cache/
-poetry.lock
-
 logs_gpu/
 notebooks/training_curves.png
 notebooks/.ipynb_checkpoints/
