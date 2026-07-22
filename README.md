@@ -38,6 +38,14 @@ Evaluated on 600 episodes using held-out test classes (20 classes never seen dur
 
 ---
 
+## Training Curves
+
+![Training Curves](assets/training_curves.png)
+
+Three panels: (1) meta-loss convergence — all methods converge similarly in loss, (2) validation accuracy — RMAML+cAdam and MAML track closely while cSGDM plateaus at 27%, (3) orthogonality error — cAdam stays stable at ~1e-5 while cSGDM explodes to 1e-4 immediately at epoch 0.
+
+---
+
 ## What is RMAML?
 
 Standard MAML optimizes meta-parameters in unconstrained Euclidean space. RMAML constrains the final classification layer to the **Stiefel manifold** St(n,p) — the space of n×p matrices with orthonormal columns (W^T W = I).
@@ -83,7 +91,7 @@ The constrained search space means RMAML outperforms MAML even with fewer inner-
 
 ---
 
-## Custom Kernel: Cayley Retraction via Woodbury Identity
+## Custom Triton Kernel: Cayley Retraction via Woodbury Identity
 
 > **The most technically novel component of this project.**
 
